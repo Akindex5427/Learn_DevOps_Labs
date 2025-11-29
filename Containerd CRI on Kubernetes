@@ -1,0 +1,55 @@
+Script: Install Kubernetes + containerd (master node)
+
+Copy/paste this whole script:
+
+#!/bin/bash
+set -e
+
+### Disable swap
+swapoff -a
+sed -i '/ swap / s/^/#/' /etc/fstab
+
+### Install required tools
+apt-get update
+apt-get install -y apt-transport-https ca-certificates curl gnupg lsb-release
+
+### Install containerd
+curl -fsSL https://download.docker.com/linux/ubuntu/gpg | gpg --dearmor -o /usr/share/keyrings/docker.gpg
+echo "deb [signed-by=/usr/share/keyrings/docker.gpg] https://download.docker.com/linux/ubuntu \
+$(lsb_release -cs) stable" | tee /etc/apt/sources.list.d/docker.list
+
+apt-get update
+apt-get install -y containerd.io
+
+### Configure containerd
+mkdir -p /etc/containerd
+containerd config default | tee /etc/containerd/config.toml
+
+# Enable Systemd cgroup driver (required for Kubernetes)
+sed -i 's/SystemdCgroup = false/SystemdCgroup = true/' /etc/containerd/config.toml
+
+systemctl restart containerd
+systemctl enable containerd
+
+### Install Kubernetes components
+curl -fsSL https://pkgs.k8s.io/core:/stable:/v1.30/deb/Release.key | gpg --dearmor -o /usr/share/keyrings/kubernetes-apt-keyring.gpg
+
+echo "deb [signed-by=/usr/share/keyrings/kubernetes-apt-keyring.gpg] \
+https://pkgs.k8s.io/core:/stable:/v1.30/deb/ /" | tee /etc/apt/sources.list.d/kubernetes.list
+
+apt-get update
+apt-get install -y kubelet kubeadm kubectl
+apt-mark hold kubelet kubeadm kubectl
+
+### Initialize Kubernetes
+kubeadm init --pod-network-cidr=192.168.0.0/16 --cri-socket=unix:///run/containerd/containerd.sock
+
+### Configure kubectl for the user
+mkdir -p $HOME/.kube
+cp /etc/kubernetes/admin.conf $HOME/.kube/config
+chown $(id -u):$(id -g) $HOME/.kube/config
+
+### Install Calico network
+kubectl apply -f https://raw.githubusercontent.com/projectcalico/calico/v3.24.1/manifests/calico.yaml
+
+echo "KUBERNETES MASTER SETUP COMPLETE"
